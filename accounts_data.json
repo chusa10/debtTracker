@@ -1,0 +1,26 @@
+[
+  {
+    "account": "Chase Club",
+    "line": 18000.0,
+    "balance": 5000.0,
+    "percentage": 27.78,
+    "min_pay": 350.0,
+    "paydate": "15th"
+  },
+  {
+    "account": "Chase Gateway",
+    "line": 5000.0,
+    "balance": 2500.0,
+    "percentage": 50.0,
+    "min_pay": 120.0,
+    "paydate": "15th"
+  },
+  {
+    "account": "Bank of America",
+    "line": 17000.0,
+    "balance": 3500.0,
+    "percentage": 20.59,
+    "min_pay": 200.0,
+    "paydate": "20th"
+  }
+]
