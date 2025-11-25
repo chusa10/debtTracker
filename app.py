@@ -1,20 +1,21 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import sys, os
+import sys
+import os
+from datetime import date
 
 from helpers import (
     format_currency,
     parse_number,
     compute_percentage,
     format_percentage_display,
-    get_percentage_tag,
 )
 from storage import load_accounts, save_accounts
 
 ENTRYBOX_WIDTH = 12
 TREEVIEW_COLUMN_WIDTH = 100
 
-# ----------------- Add this at the TOP of app.py -----------------
+
 def resource_path(relative_path):
     """
     Get absolute path to resource.
@@ -27,11 +28,16 @@ def resource_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 
+
 class CreditTracker(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.iconbitmap(resource_path("credit.ico"))
 
+        # Default utilization threshold for "high utilization" coloring
+        self.util_threshold = 50.0  # percent
+
+        # Window setup
+        self.iconbitmap(resource_path("credit.ico"))
         self.title("Credit Tracker")
         self.geometry("1100x600")
         self.configure(bg="#F1F3E0")  # main bg color
@@ -122,6 +128,10 @@ class CreditTracker(tk.Tk):
             background=[("selected", BTN_BG)],
             foreground=[("selected", "#ffffff")],
         )
+        style.configure(
+            "Summary.TFrame",
+            background="#F0F0F0",
+        )
 
     # ----------------- Layout -----------------
 
@@ -140,6 +150,15 @@ class CreditTracker(tk.Tk):
         # --- Left panel ---
         header = ttk.Label(left_frame, text="Data Entry", style="Header.TLabel")
         header.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        # Settings button (gear icon style)
+        settings_btn = ttk.Button(
+            left_frame,
+            text="⚙",
+            width=3,
+            command=self.open_settings,
+        )
+        settings_btn.grid(row=0, column=2, sticky="e", pady=(0, 10), padx=(5, 0))
 
         ttk.Label(left_frame, text="Select Account:", style="FieldLabel.TLabel").grid(
             row=1, column=0, sticky="w", pady=2, padx=10
@@ -160,7 +179,7 @@ class CreditTracker(tk.Tk):
         self.entry_new_balance.grid(row=2, column=1, sticky="ew", pady=5, padx=10)
 
         separator = ttk.Separator(left_frame, orient="horizontal")
-        separator.grid(row=3, column=0, columnspan=2, sticky="ew", pady=10, padx=10)
+        separator.grid(row=3, column=0, columnspan=3, sticky="ew", pady=10, padx=10)
 
         ttk.Label(left_frame, text="Add Account:", style="FieldLabel.TLabel").grid(
             row=4, column=0, sticky="w", pady=5, padx=10
@@ -195,7 +214,7 @@ class CreditTracker(tk.Tk):
         left_frame.columnconfigure(1, weight=1)
 
         buttons_frame = ttk.Frame(left_frame, style="Left.TFrame")
-        buttons_frame.grid(row=9, column=0, columnspan=2, pady=(15, 0), sticky="ew")
+        buttons_frame.grid(row=9, column=0, columnspan=3, pady=(15, 0), sticky="ew")
         buttons_frame.columnconfigure((0, 1, 2), weight=1)
 
         btn_add = ttk.Button(buttons_frame, text="Add", command=self.add_item)
@@ -210,7 +229,7 @@ class CreditTracker(tk.Tk):
         btn_clear = ttk.Button(
             left_frame, text="Clear Fields", command=self.clear_fields
         )
-        btn_clear.grid(row=10, column=0, columnspan=2, pady=(10, 0), sticky="ew")
+        btn_clear.grid(row=10, column=0, columnspan=3, pady=(10, 0), sticky="ew")
 
         # --- Right panel: top (Records) + bottom (Summary) ---
 
@@ -219,7 +238,7 @@ class CreditTracker(tk.Tk):
 
         # TOP: table area
         right_top_frame = ttk.Frame(right_frame, style="Right.TFrame")
-        right_top_frame.pack(fill="both")
+        right_top_frame.pack(fill="both", expand=True)
 
         columns = ("account", "line", "balance", "percentage", "min_pay", "paydate")
         self.tree = ttk.Treeview(
@@ -249,7 +268,7 @@ class CreditTracker(tk.Tk):
         self.tree.pack(side="left", fill="both", expand=True)
         tv_scroll.pack(side="right", fill="y")
 
-        # Tag for high utilization
+        # Tag for high utilization only
         self.tree.tag_configure("high_util", background="#E08F79", foreground="#452829")
 
         # BOTTOM: summary / chart area
@@ -309,13 +328,13 @@ class CreditTracker(tk.Tk):
         # Clear previous drawing
         self.chart_canvas.delete("all")
 
-        # Force geometry update so width/height are correct
+        # Ensure geometry is up-to-date
         self.chart_canvas.update_idletasks()
 
-        # Get canvas size (fallback if not yet fully drawn)
         width = self.chart_canvas.winfo_width()
         height = self.chart_canvas.winfo_height()
 
+        # Fallback sensible sizes if still too small
         if width < 150:
             width = 260
         if height < 100:
@@ -326,7 +345,7 @@ class CreditTracker(tk.Tk):
         cy = height / 2
         r = size / 2
 
-        # Background ring
+        # Background ring (4 coordinates)
         self.chart_canvas.create_oval(
             cx - r,
             cy - r,
@@ -336,14 +355,15 @@ class CreditTracker(tk.Tk):
             width=20,
         )
 
+        # Utilization ratio
         if total_line > 0:
             util_ratio = total_balance / total_line
         else:
             util_ratio = 0.0
 
-        extent = util_ratio * 359.9  # draw almost full circle max
+        extent = util_ratio * 359.9  # max arc
 
-        # Utilization arc
+        # Utilization arc (4 coordinates)
         if util_ratio > 0:
             self.chart_canvas.create_arc(
                 cx - r,
@@ -375,6 +395,141 @@ class CreditTracker(tk.Tk):
             )
         )
 
+    # ----------------- Settings (threshold) -----------------
+
+    def get_percentage_tag(self, percentage):
+        """
+        Return 'high_util' if percentage meets the current threshold,
+        else '' (no tag). Uses self.util_threshold.
+        """
+        try:
+            p = float(percentage)
+        except (ValueError, TypeError):
+            return ""
+        return "high_util" if p >= self.util_threshold else ""
+
+    def open_settings(self):
+        """Open a small window to adjust the high-utilization threshold."""
+        settings_win = tk.Toplevel(self)
+        settings_win.title("Settings")
+        settings_win.transient(self)
+        settings_win.grab_set()
+        settings_win.resizable(False, False)
+
+        ttk.Label(
+            settings_win,
+            text="High utilization threshold (%):",
+            style="FieldLabel.TLabel",
+            background="#F0F0F0",
+        ).grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
+
+        threshold_var = tk.StringVar(value=str(self.util_threshold))
+        entry = ttk.Entry(settings_win, textvariable=threshold_var, width=10)
+        entry.grid(row=0, column=1, padx=10, pady=(10, 5), sticky="w")
+        entry.focus()
+
+        def save_threshold():
+            try:
+                val = float(threshold_var.get())
+                if val < 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid value",
+                    "Please enter a valid number greater than or equal to 0.",
+                    parent=settings_win,
+                )
+                return
+
+            self.util_threshold = val
+            # Re-apply tags/colors to all rows based on new threshold
+            self.reapply_utilization_tags()
+            settings_win.destroy()
+
+        btn_frame = ttk.Frame(settings_win, style="Summary.TFrame")
+        btn_frame.grid(row=1, column=0, columnspan=2, pady=(10, 10))
+
+        ttk.Button(btn_frame, text="Save", command=save_threshold).grid(
+            row=0, column=0, padx=5
+        )
+        ttk.Button(btn_frame, text="Cancel", command=settings_win.destroy).grid(
+            row=0, column=1, padx=5
+        )
+
+    def reapply_utilization_tags(self):
+        """Recalculate percentage & tags for all rows using the current threshold."""
+        for item in self.tree.get_children():
+            values = list(self.tree.item(item, "values"))
+            if not values or len(values) < 6:
+                continue
+
+            # values = [account, line, balance, percentage, min_pay, paydate]
+            line_num = parse_number(values[1])
+            bal_num = parse_number(values[2])
+
+            percentage_num = compute_percentage(line_num, bal_num)
+            percentage_disp = format_percentage_display(percentage_num)
+            values[3] = percentage_disp  # update display
+
+            current_tags = set(self.tree.item(item, "tags"))
+            # remove any old high_util
+            current_tags.discard("high_util")
+
+            tag = self.get_percentage_tag(percentage_num)
+            if tag:
+                current_tags.add(tag)
+
+            self.tree.item(item, values=values, tags=tuple(current_tags))
+
+    # ----------------- Due date alerts (popup only) -----------------
+
+    def parse_due_day(self, paydate_str):
+        """
+        Extract the day number from the paydate text.
+        Examples:
+          '15th' -> 15
+          '20'   -> 20
+          ' 3rd' -> 3
+        Returns an int or None if no digits found.
+        """
+        s = str(paydate_str).strip()
+        if not s:
+            return None
+
+        digits = "".join(ch for ch in s if ch.isdigit())
+        if not digits:
+            return None
+
+        try:
+            return int(digits)
+        except ValueError:
+            return None
+
+    def check_due_alerts(self, show_popup=True):
+        """
+        Check which accounts have a due date of tomorrow.
+        If show_popup is True, show a message listing them.
+        (No Treeview color changes here.)
+        """
+        today_day = date.today().day
+        due_tomorrow_accounts = []
+
+        for item in self.tree.get_children():
+            values = self.tree.item(item, "values")
+            if not values or len(values) < 6:
+                continue
+
+            account = values[0]
+            paydate = values[5]
+
+            day = self.parse_due_day(paydate)
+            if day is not None and day == today_day + 1:
+                due_tomorrow_accounts.append(account)
+
+        if show_popup and due_tomorrow_accounts:
+            msg = "Payment due tomorrow for:\n\n" + "\n".join(due_tomorrow_accounts)
+            messagebox.showinfo("Upcoming payments", msg, parent=self)
+
     # ----------------- Treeview selection helpers -----------------
 
     def clear_tree_selection(self):
@@ -400,27 +555,26 @@ class CreditTracker(tk.Tk):
             balance = format_currency(bal_val)
             percentage_num = compute_percentage(line_val, bal_val)
             percentage_disp = format_percentage_display(percentage_num)
-            tag = get_percentage_tag(percentage_num)
+            tag = self.get_percentage_tag(percentage_num)
 
             min_pay = format_currency(row.get("min_pay", 0))
             paydate = row.get("paydate", "")
 
+            tags = []
             if tag:
-                self.tree.insert(
-                    "",
-                    "end",
-                    values=(account, line, balance, percentage_disp, min_pay, paydate),
-                    tags=(tag,),
-                )
-            else:
-                self.tree.insert(
-                    "",
-                    "end",
-                    values=(account, line, balance, percentage_disp, min_pay, paydate),
-                )
+                tags.append(tag)
+
+            self.tree.insert(
+                "",
+                "end",
+                values=(account, line, balance, percentage_disp, min_pay, paydate),
+                tags=tuple(tags) if tags else (),
+            )
 
         self.refresh_account_combobox()
         self.update_summary_chart()
+        # Popup once on startup if there are accounts due tomorrow
+        self.check_due_alerts(show_popup=True)
 
     def save_to_db(self):
         """Collect Treeview rows and save to JSON (via storage.save_accounts)."""
@@ -496,30 +650,38 @@ class CreditTracker(tk.Tk):
             messagebox.showinfo("Limit reached", "You can only store up to 20 rows.")
             return
 
-        account, line, balance, percentage_disp, min_pay, paydate, percentage_num = self.get_entry_data()
+        (
+            account,
+            line,
+            balance,
+            percentage_disp,
+            min_pay,
+            paydate,
+            percentage_num,
+        ) = self.get_entry_data()
+
         if not account:
             return
 
-        tag = get_percentage_tag(percentage_num)
+        tag = self.get_percentage_tag(percentage_num)
 
+        tags = []
         if tag:
-            self.tree.insert(
-                "",
-                "end",
-                values=(account, line, balance, percentage_disp, min_pay, paydate),
-                tags=(tag,),
-            )
-        else:
-            self.tree.insert(
-                "",
-                "end",
-                values=(account, line, balance, percentage_disp, min_pay, paydate),
-            )
+            tags.append(tag)
+
+        self.tree.insert(
+            "",
+            "end",
+            values=(account, line, balance, percentage_disp, min_pay, paydate),
+            tags=tuple(tags) if tags else (),
+        )
 
         self.refresh_account_combobox()
         self.save_to_db()
         self.update_summary_chart()
         self.clear_fields()
+        # No popup here, just on startup; if you want, change to show_popup=True
+        self.check_due_alerts(show_popup=False)
 
     def update_item(self):
         """
@@ -570,14 +732,15 @@ class CreditTracker(tk.Tk):
         values[2] = format_currency(bal_num)
         values[3] = percentage_disp
 
-        tag = get_percentage_tag(percentage_num)
+        # Rebuild tags for utilization only
+        current_tags = set(self.tree.item(target_item, "tags"))
+        current_tags.discard("high_util")
+        tag = self.get_percentage_tag(percentage_num)
+        if tag:
+            current_tags.add(tag)
 
         # Push back to Treeview
-        if tag:
-            self.tree.item(target_item, values=values, tags=(tag,))
-        else:
-            # clear tags if previously high and now <= 50
-            self.tree.item(target_item, values=values, tags="")
+        self.tree.item(target_item, values=values, tags=tuple(current_tags))
 
         # Visually select and scroll to the updated row
         self.tree.selection_set(target_item)
@@ -586,9 +749,10 @@ class CreditTracker(tk.Tk):
         # Clear only the New Balance box
         self.entry_new_balance.delete(0, tk.END)
 
-        # Persist changes + update chart
+        # Persist changes + update chart + (silent) alert check
         self.save_to_db()
         self.update_summary_chart()
+        self.check_due_alerts(show_popup=False)
 
     def delete_item(self):
         selected = self.tree.selection()
@@ -599,6 +763,7 @@ class CreditTracker(tk.Tk):
         self.save_to_db()
         self.update_summary_chart()
         self.clear_fields()
+        self.check_due_alerts(show_popup=False)
 
     # ----------------- Treeview double-click -----------------
 

@@ -37,10 +37,4 @@ def format_percentage_display(percentage):
     return f"{p:.1f}%"
 
 
-def get_percentage_tag(percentage):
-    """Return 'high_util' only if percentage > 50."""
-    try:
-        p = float(percentage)
-    except (ValueError, TypeError):
-        return ""
-    return "high_util" if p >= 50 else ""
+
